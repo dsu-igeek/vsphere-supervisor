@@ -27,7 +27,8 @@ The data flow of packages, binaries, and images between the internet-connected a
 * This guide is for VCF / VVF deployments based on pre-9.0.0 releases, and an **Enterprise OCI-compliant registry** is assumed to be available in the air-gapped environment and accessible by all platform nodes, including the admin host. The registry must be accessible over HTTPS. The certificate can be signed by a trusted certificate authority or self-signed.
 * **Note** If an Enterprise registry is unavailable in the air-gapped environment, please visit this [document](/airgapped/air-gapped-harbor.md) to install and configure Harbor as Bootstrap and Platform registries.
 * For VCF / VVF 9.0.0 deployments, please visit this [document](/airgapped/air-gapped-vcf90.md) to follow the VKS deployment guide for Air-Gapped Environments.
-* For VCF / VVF 9.1.0 and later deployments, the distribution docker registry in VCF Software Depot can be used as the OCI compliant registry to host OCI images for system services, please visit this [document](/airgapped/air-gapped-vcf91.md) to follow the VKS deployment guide for Air-Gapped Environments.
+* For VCF / VVF 9.1.0 deployments, the distribution docker registry in VCF Software Depot can be used as the OCI compliant registry to host OCI images for system services, please visit this [document](/airgapped/air-gapped-vcf91.md) to follow the VKS deployment guide for Air-Gapped Environments.
+* For VCF / VVF 9.1.1 and later deployments, please follow this [document](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/managing-vsphere-kubernetes-service/deploying-vks-in-airgappen-environment/deploy-vks-in-airgapped-environments.html) to leverage VCF download tool and VCF Software Depot for VKS deployments in airgapped environments.
 
 ## Bill of Materials
 The table below provides sample hostnames and versions used throughout the document for easy reference -
