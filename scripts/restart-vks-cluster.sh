@@ -38,7 +38,7 @@ CONTROL_PLANE_REPLICAS="${2:-3}"
 # Verifies every required env var is set, and that it's actually usable
 # (not just non-empty) - e.g. this is what catches a vCenter with multiple
 # datacenters needing GOVC_DATACENTER, before any VM has been powered on.
-# Unlike shutdown/suspend, this does NOT check live access to the workload
+# Unlike shutdown, this does NOT check live access to the workload
 # cluster - it's expected to be down until this script powers it back up,
 # so only its kubeconfig file's existence is checked here.
 check_env() {
@@ -70,21 +70,22 @@ check_env() {
     exit 1
   fi
 
-  local dc_err 
+  local dc_err
   if ! dc_err=$(govc datacenter.info 2>&1 >/dev/null); then
     echo "Could not retrieve datacenters: ${dc_err}" >&2
-    exit 1               
+    exit 1
   fi
-  if  [[ ( ! -v GOVC_DATACENTER ) && $(govc datacenter.info -json | jq '.datacenters | length') > 1 ]]; then
+  if [[ ( ! -v GOVC_DATACENTER ) && $(govc datacenter.info -json | jq '.datacenters | length') -gt 1 ]]; then
     echo "Multiple datacenters found, set GOVC_DATACENTER to one of the following" >&2
     govc datacenter.info -json | jq -r '.datacenters | map(.name) | .[]' >&2
     exit 1
-  fi  
+  fi
 
 }
 
 check_env
 
+# shellcheck disable=SC2034  # out_ref is a nameref: assignment writes to the caller's array
 get_provider_ids_array() {
   local selector="$1"
   local -n out_ref=$2

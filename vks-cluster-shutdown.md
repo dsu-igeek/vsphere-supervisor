@@ -8,7 +8,7 @@ For long term shutdown or archiving, do not use this procedure.  Instead, a back
 
 # Preparation
 
-   Before beginning the shutdown procedure:  
+Before beginning the shutdown procedure:  
 * Check certificate expiry and rotate as necessary  
 * Backup the cluster  
 * Remove pod disruption budgets  
@@ -43,8 +43,11 @@ Check certificates and passwords and ensure that they will not expire during you
 
 Shutdown of a VKS Workload Cluster is the process of powering off all of the Control Plane and Worker Node VMs.  Once this has completed, the cluster will be powered off and will not respond to any API server requests and all applications/services running in the cluster will not be available.  Kubernetes configuration and persistent volumes will remain.  When the cluster is powered up, all applications will resume operation.  
      
-The shutdown procedure is:  
-* Prepare applications for shutdown if necessary  
+The shutdown procedure is:
+* Ensure that the cluster is healthy and not being upgraded or scaled
+  * Ensure that all nodes in the cluster are healthy
+  * Ensure that Addons have been reconciled
+  * Ensure that no CAPI operations are in progress
 * Cordon and drain worker nodes  
 * Scale down the control plane  
 * Pause CAPI reconciliation  
@@ -59,7 +62,7 @@ All of the nodes for the cluster should be healthy and there should not be any o
 
 ### Ensure that all nodes in the cluster are healthy
 
-This command needs to be executed against the *workload* cluster, not the Supervisor cluster.  $WORKLOAD_KUBECONFIG should have the path of the Kubernetes config for the workload cluster.
+This command needs to be executed against the *workload* cluster, not the Supervisor cluster.  `WORKLOAD_KUBECONFIG` should have the path of the Kubernetes config for the workload cluster.
 
 ```
 KUBECONFIG="$WORKLOAD_KUBECONFIG" kubectl wait --for=condition=Ready node --all --timeout=10s
@@ -76,13 +79,14 @@ kubectl get cluster $CLUSTER_NAME -n $KUBENAMESPACE -o jsonpath='{.status.condit
 ```
 kubectl get cluster $CLUSTER_NAME -n $KUBENAMESPACE -o json | jq -r '.status.conditions [] | select(.type=="RollingOut" or .type=="ScalingUp" or .type=="ScalingDown" or .type=="Remediating") | .type + ": " + .status'
 ```
+All conditions should return `False`
 ## Cordon and drain worker nodes
 
 All pods should be stopped (except for DaemonSet pods which cannot be) before the control plane is scaled down.  This will stop any running applications and reduce the load on the control plane before the control plane is scaled down.  If you have Pod Disruption Budgets set, you will need to remove these to enable all pods to be stopped - note the names and specs for when restarting the cluster.
 
 ### Cordon the worker nodes
 
-Cordon all of the worker nodes first.  This will prevent pods being started on different nodes as we drain nodes.
+Cordon all of the worker nodes first.  This will prevent pods being started on different nodes as nodes are drained.
 ```
 KUBECONFIG="$WORKLOAD_KUBECONFIG" kubectl cordon $(KUBECONFIG="$WORKLOAD_KUBECONFIG" kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o name)
 ```
@@ -115,9 +119,9 @@ Tell CAPI to reduce the number of replicas for the control plane to 1 in the /sp
 kubectl -n $KUBENAMESPACE patch cluster $CLUSTER_NAME  --type='json' -p='[{"op": "replace", "path": "/spec/topology/controlPlane/replicas", "value": 1}]'
 ```
 
-### Wait for the control plane to scale down and is healthy
+### Wait for the control plane to scale down and be healthy
 
-This step is very important - do not power off any control plane VMs until there is only one healthy control plane VM running.
+These steps are very important - do not power off any control plane VMs until there is only one healthy control plane VM running.  Failure to do so may result in the *etcd* database losing quorum.  Refer to [https://knowledge.broadcom.com/external/article/423616/recovery-etcd-quorum-loss-for-vks-cluste.html](https://knowledge.broadcom.com/external/article/423616/recovery-etcd-quorum-loss-for-vks-cluste.html) if quorum is lost.
 
 #### Check that the control plane has scaled down
 ```
@@ -146,19 +150,19 @@ The virtual machines for the nodes are controlled by VM Operator.  Normally, VM 
 
 The sample commands working with vCenter use govc.  These environment variables need to be set for govc to access vCenter.
 
-GOVC_URL — vCenter server URL, e.g. `https://<vc-hostname>`
+`GOVC_URL` — vCenter server URL, e.g. `https://<vc-hostname>`
 
-GOVC_USERNAME — vCenter username, e.g. `administrator@vsphere.local`
+`GOVC_USERNAME` — vCenter username, e.g. `administrator@vsphere.local`
 
-GOVC_PASSWORD — vCenter password for that user
+`GOVC_PASSWORD` — vCenter password for that user
 
-GOVC_INSECURE — set to "1" to skip TLS certificate verification (needed for self-signed vCenter certs)
+`GOVC_INSECURE` — set to "1" to skip TLS certificate verification (needed for self-signed vCenter certs)
 
-GOVC_DATACENTER — datacenter path/name, required if the vCenter has more than one datacenter
+`GOVC_DATACENTER` — datacenter path/name, required if the vCenter has more than one datacenter
 
 ### Power off the control plane VM
 
-Power off the control plane VM first - this will prevent any operations related to nodes going unavailable as the worker nodes are suspended.
+Power off the control plane VM first - this will prevent any operations related to nodes going unavailable as the worker nodes are shut down.
 
 ### Retrieve UUID of control plane VM
 
@@ -184,7 +188,7 @@ govc vm.power -s -vm.uuid="$UUID"
 ### Retrieve UUIDs of the worker nodes
 
 ```
-kubectl get machines -n "$KUBENAMESPACE" -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME},\!cluster.x-k8s.io/control-plane" -o jsonpath='{range .items[*]}{.spec.providerID}{"\n"}{end}' | sed 's|^vsphere://||'
+kubectl get machines -n "$KUBENAMESPACE" -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME},"'!cluster.x-k8s.io/control-plane' -o jsonpath='{range .items[*]}{.spec.providerID}{"\n"}{end}' | sed 's|^vsphere://||'
 ```
 
 ### Set the vmservice.virtualmachine.pause property for each VM.
@@ -280,7 +284,7 @@ kubectl -n "$KUBENAMESPACE" patch cluster "$CLUSTER_NAME"  --type='json'  -p='[{
 
 ## Scale up the control plane to its original number of replicas
 
-Set CONTROL_PLANE_NODES to the original number of nodes obtained when you shutdown the cluster.     
+Set `CONTROL_PLANE_NODES` to the original number of nodes obtained when you shutdown the cluster.     
 
 ```
 kubectl -n $KUBENAMESPACE patch cluster $CLUSTER_NAME --type='json' -p='[{"op": "replace", "path": "/spec/topology/controlPlane/replicas", "value": '"$CONTROL_PLANE_NODES"'}]'

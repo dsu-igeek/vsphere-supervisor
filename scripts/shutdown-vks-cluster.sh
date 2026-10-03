@@ -83,7 +83,7 @@ check_env() {
     echo "Could not retrieve datacenters: ${dc_err}" >&2
     exit 1
   fi
-  if  [[ ( ! -v GOVC_DATACENTER ) && $(govc datacenter.info -json | jq '.datacenters | length') > 1 ]]; then
+  if [[ ( ! -v GOVC_DATACENTER ) && $(govc datacenter.info -json | jq '.datacenters | length') -gt 1 ]]; then
     echo "Multiple datacenters found, set GOVC_DATACENTER to one of the following" >&2
     govc datacenter.info -json | jq -r '.datacenters | map(.name) | .[]' >&2
     exit 1
@@ -115,11 +115,12 @@ check_no_operations_in_progress() {
     echo "Cluster ${CLUSTER_NAME} has operation(s) in progress (${in_progress}) - aborting" >&2
     exit 1
   fi
+  local addons_reconciled
   addons_reconciled=$(
     kubectl get cluster "$CLUSTER_NAME" -n "$KUBENAMESPACE" \
       -o jsonpath='{.status.conditions[?(@.type == "AddonsReconciled")].status}')
   if [[ "$addons_reconciled" != "True" ]]; then
-    echo "Addons are not reconciled for cluster $(CLUSTER_NAME) - aborting" > $2
+    echo "Addons are not reconciled for cluster ${CLUSTER_NAME} - aborting" >&2
     exit 1
   fi
 }
@@ -203,6 +204,7 @@ echo "Pausing cluster ${CLUSTER_NAME}..."
 kubectl patch cluster "$CLUSTER_NAME" -n "$KUBENAMESPACE" \
   --type='json' -p='[{"op": "replace", "path": "/spec/paused", "value": true}]'
 
+# shellcheck disable=SC2034  # out_ref is a nameref: assignment writes to the caller's array
 get_provider_ids_array() {
   local selector="$1"
   local -n out_ref=$2
