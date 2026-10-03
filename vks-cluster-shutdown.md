@@ -55,7 +55,6 @@ The shutdown procedure is:
   * Power off the control plane VM  
   * Power off the worker nodes
 
-
 ## Ensure that the cluster is healthy and not being upgraded or scaled
 
 All of the nodes for the cluster should be healthy and there should not be any operations such as upgrade or scaling in progress.
@@ -307,3 +306,11 @@ KUBECONFIG="$WORKLOAD_KUBECONFIG" kubectl uncordon $(KUBECONFIG="$WORKLOAD_KUBEC
 ## Verify that the cluster is working fully
 
   At this point, the Kubernetes cluster should begin scheduling all of the pods and services.  This may take some time.  Check that all services and applications restart properly.
+
+# Scripts
+Sample scripts are provided to shutdown and restart a cluster.  Use these scripts at your own
+risk!  Before running the scripts review the procedures above and be aware of what operations will be executed.
+
+Shutdown script - [shutdown-vks-cluster.sh](scripts/shutdown-vks-cluster.sh)
+
+Restart script - [restart-vks-cluster.sh](scripts/restart-vks-cluster.sh)
