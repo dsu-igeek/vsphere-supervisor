@@ -1,22 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script will shutdown a VKS cluster.
 # Scales the cluster's control plane down to 1 replica, waits for that to
 # settle, pauses the Cluster, then powers off all VMs backing the
 # cluster's Machines via govc (control-plane VM first, then workers).
-#
-# Before powering off, each VM is paused via VM Operator's admin pause
-# mechanism: setting the ExtraConfig key "vmservice.virtualmachine.pause"
-# to "true" directly on the vCenter VM. VM Operator's reconcilePowerState
-# checks this (paused.ByAdmin) and skips power state reconciliation for
-# paused VMs, so the power-off sticks without needing to touch Kubernetes
-# at all (no ownership webhook involved, no need to scale down
-# vmware-system-vmop-controller-manager).
-#
-# Before touching the control plane, all worker nodes are cordoned (all of
-# them, up front) and then drained. Cordoning everything first prevents
-# pods evicted from one worker being rescheduled onto another worker that
-# is about to be drained anyway.
 #
 # Required env vars:
 #   KUBECONFIG          - path to kubeconfig for the Supervisor cluster
@@ -30,12 +18,19 @@ set -euo pipefail
 #     - standard govc connection env vars
 #   GOVC_DATACENTER - required if the vCenter has more than one datacenter
 #
-# Usage: ./shutdown-vks-cluster.sh <cluster-name>
-#
-# To restart, use restart-vks-cluster.sh.
+# Usage: ./shutdown-vks-cluster.sh [-y|--yes] <cluster-name>
+#   Before doing anything, the script lists the shutdown prerequisites and
+#   asks you to confirm they have been completed. -y/--yes skips the prompt
+#   (for non-interactive use, once the prerequisites have been handled).
 
 CONTROL_PLANE_WAIT_TIMEOUT_SECS=600
 CONTROL_PLANE_POLL_INTERVAL_SECS=10
+
+ASSUME_YES=0
+if [[ "${1:-}" == "-y" || "${1:-}" == "--yes" ]]; then
+  ASSUME_YES=1
+  shift
+fi
 
 if [[ $# -ne 1 ]]; then
   echo "Usage: $0 <cluster-name>" >&2
@@ -44,10 +39,52 @@ fi
 
 CLUSTER_NAME="$1"
 
-# Verifies every required env var is set, and that it's actually usable
-# (not just non-empty) - e.g. this is what catches a vCenter with multiple
-# datacenters needing GOVC_DATACENTER, before any cordon/drain/scale/pause
-# has happened, instead of failing on the first govc call partway through.
+# Shows the manual prerequisites from vks-cluster-shutdown.md (the script
+# cannot verify these) and requires an explicit "yes" before continuing.
+confirm_prerequisites() {
+  cat <<EOF
+
+Shutdown of VKS cluster '${CLUSTER_NAME}'
+
+This powers off every control-plane and worker VM. Pods are terminated and
+the API server will be unavailable until the cluster is restarted.
+
+Before continuing, make sure you have completed these prerequisites:
+
+  1. Certificate expiry: checked, and rotated where necessary, so nothing
+     expires while the cluster is shut down.
+  2. Backup: the cluster has been backed up, and a copy of the Cluster
+     spec has been saved so the cluster can be re-created if needed.
+  3. Pod Disruption Budgets: copies saved, and the PDBs removed or relaxed
+     so that all pods can be drained.
+  4. Applications: anything needing an orderly shutdown has been shut down.
+
+The script will then check that all nodes are healthy, addons are
+reconciled and no cluster operations are in progress before proceeding.
+
+EOF
+
+  if [[ "$ASSUME_YES" -eq 1 ]]; then
+    echo "--yes given, continuing without confirmation."
+    return
+  fi
+
+  if [[ ! -t 0 ]]; then
+    echo "Not running interactively - re-run with --yes to confirm the prerequisites are done" >&2
+    exit 1
+  fi
+
+  local answer
+  read -r -p "Have you completed all of the steps above? Type 'yes' to continue: " answer
+  if [[ "$answer" != "yes" ]]; then
+    echo "Aborting - no changes were made." >&2
+    exit 1
+  fi
+}
+
+confirm_prerequisites
+
+# Verifies every required env var is set and usable
 check_env() {
   local missing=0
   for var in KUBECONFIG WORKLOAD_KUBECONFIG KUBENAMESPACE GOVC_URL GOVC_USERNAME GOVC_PASSWORD; do
@@ -92,10 +129,8 @@ check_env() {
 
 check_env
 
-# Refuses to start if any node is unhealthy or CAPI is already mid
-# upgrade/scale - cordoning/draining/scaling down on top of an existing
-# operation is exactly the kind of overlapping-change scenario this whole
-# procedure is designed to avoid.
+# Refuses to start if any node is unhealthy, addons are not reconciled, or
+# CAPI is already mid upgrade/scale.
 check_no_operations_in_progress() {
   echo "Verifying all nodes are healthy and no cluster operations are in progress..."
 
@@ -115,6 +150,7 @@ check_no_operations_in_progress() {
     echo "Cluster ${CLUSTER_NAME} has operation(s) in progress (${in_progress}) - aborting" >&2
     exit 1
   fi
+
   local addons_reconciled
   addons_reconciled=$(
     kubectl get cluster "$CLUSTER_NAME" -n "$KUBENAMESPACE" \
@@ -171,9 +207,6 @@ while true; do
 
   # Wait for replicas (total Machine count) to hit 1 - this confirms the
   # excess Machine has been FULLY deleted, not just marked unready.
-  # Powering off a VM via govc while CAPI is still gracefully tearing it
-  # down (including removing it as an etcd member) can interrupt that
-  # removal and leave a stale etcd member behind.
   if [[ "$current_total" == "1" ]]; then
     echo "Control plane scaled down to 1 replica (excess machine fully deleted)."
     break
@@ -189,10 +222,7 @@ while true; do
 done
 
 # Separately confirm the surviving node is actually healthy before we shut
-# it down - checked directly against the Node object, not via KCP's
-# readyReplicas (that field is easy to mix up with the replicas check
-# above, and substituting it for replicas is exactly what caused the
-# earlier etcd-corruption incident).
+# it down.
 echo "Verifying all nodes are healthy before powering off..."
 if ! KUBECONFIG="$WORKLOAD_KUBECONFIG" kubectl wait --for=condition=Ready node --all --timeout=60s >/dev/null; then
   echo "Not all nodes are healthy after scaling down - aborting" >&2
