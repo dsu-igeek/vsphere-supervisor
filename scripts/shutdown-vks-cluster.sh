@@ -182,6 +182,13 @@ cordon_and_drain_workers() {
 
 cordon_and_drain_workers
 
+ORIGINAL_CONTROL_PLANE_REPLICAS=$(
+  kubectl get cluster "$CLUSTER_NAME" -n "$KUBENAMESPACE" \
+    -o jsonpath='{.spec.topology.controlPlane.replicas}'
+)
+echo "Original number of control plane replicas: ${ORIGINAL_CONTROL_PLANE_REPLICAS}"
+echo "Note this number - restart-vks-cluster.sh requires it: ./restart-vks-cluster.sh ${CLUSTER_NAME} ${ORIGINAL_CONTROL_PLANE_REPLICAS}"
+
 echo "Scaling control plane for ${CLUSTER_NAME} to 1 replica..."
 kubectl patch cluster "$CLUSTER_NAME" -n "$KUBENAMESPACE" \
   --type='json' -p='[{"op": "replace", "path": "/spec/topology/controlPlane/replicas", "value": 1}]'

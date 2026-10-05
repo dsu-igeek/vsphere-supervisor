@@ -21,19 +21,24 @@ set -euo pipefail
 #     - standard govc connection env vars
 #   GOVC_DATACENTER - required if the vCenter has more than one datacenter
 #
-# Usage: ./restart-vks-cluster.sh <cluster-name> [control-plane-replicas]
-#   control-plane-replicas defaults to 3 if not specified.
+# Usage: ./restart-vks-cluster.sh <cluster-name> <control-plane-replicas>
+#   control-plane-replicas is the original number of control plane replicas.
 
 CONTROL_PLANE_WAIT_TIMEOUT_SECS=600
 CONTROL_PLANE_POLL_INTERVAL_SECS=10
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "Usage: $0 <cluster-name> [control-plane-replicas]" >&2
+if [[ $# -ne 2 ]]; then
+  echo "Usage: $0 <cluster-name> <control-plane-replicas>" >&2
   exit 1
 fi
 
 CLUSTER_NAME="$1"
-CONTROL_PLANE_REPLICAS="${2:-3}"
+CONTROL_PLANE_REPLICAS="$2"
+
+if [[ ! "$CONTROL_PLANE_REPLICAS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "control-plane-replicas must be a positive integer (got '${CONTROL_PLANE_REPLICAS}')" >&2
+  exit 1
+fi
 
 # Verifies every required env var is set, and that it's actually usable
 # (not just non-empty) - e.g. this is what catches a vCenter with multiple
